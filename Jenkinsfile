@@ -4,19 +4,10 @@ pipeline {
     agent any
 
     environment {
-        APP_DIR = '/home/ubuntu/Simple-Calculator-App'
         COMPOSE_FILE = 'docker-compose.yml'
     }
 
     stages {
-
-        stage('Checkout') {
-            steps {
-                echo 'Checking out latest code...'
-
-                checkout scm
-            }
-        }
 
         stage('Verify Files') {
             steps {
@@ -25,23 +16,37 @@ pipeline {
                 sh '''
                     set -e
 
-                    cd ${APP_DIR}
-
-                    echo "Application directory:"
+                    echo "Jenkins workspace:"
                     pwd
 
-                    echo "Git commit:"
-                    git rev-parse --short HEAD
+                    echo "Workspace contents:"
+                    ls -la
 
                     echo "Checking required files..."
 
                     test -f docker-compose.yml
                     test -f nginx.conf
-                    test -f .env
                     test -f Dockerfile
                     test -f backend/Dockerfile
 
                     echo "All required files are present."
+                '''
+            }
+        }
+
+        stage('Prepare Environment') {
+            steps {
+                echo 'Preparing environment file...'
+
+                sh '''
+                    set -e
+
+                    if [ ! -f .env ]; then
+                        echo "ERROR: .env file is missing from Jenkins workspace."
+                        exit 1
+                    fi
+
+                    echo ".env file found."
                 '''
             }
         }
@@ -52,8 +57,6 @@ pipeline {
 
                 sh '''
                     set -e
-
-                    cd ${APP_DIR}
 
                     docker compose -f ${COMPOSE_FILE} config
                 '''
@@ -67,8 +70,6 @@ pipeline {
                 sh '''
                     set -e
 
-                    cd ${APP_DIR}
-
                     docker compose -f ${COMPOSE_FILE} build
                 '''
             }
@@ -81,9 +82,7 @@ pipeline {
                 sh '''
                     set -e
 
-                    cd ${APP_DIR}
-
-                    docker compose -f ${COMPOSE_FILE} up -d --build
+                    docker compose -f ${COMPOSE_FILE} up -d
                 '''
             }
         }
@@ -94,8 +93,6 @@ pipeline {
 
                 sh '''
                     set -e
-
-                    cd ${APP_DIR}
 
                     sleep 10
 
@@ -109,12 +106,12 @@ pipeline {
 
         stage('Health Check') {
             steps {
-                echo 'Checking application health...'
+                echo 'Checking API health...'
 
                 sh '''
                     set -e
 
-                    echo "Testing API health endpoint..."
+                    echo "Testing http://localhost/api/health"
 
                     for i in 1 2 3 4 5
                     do
@@ -125,7 +122,7 @@ pipeline {
                             exit 0
                         fi
 
-                        echo "API is not ready yet. Retrying in 5 seconds..."
+                        echo "API is not ready. Retrying in 5 seconds..."
                         sleep 5
                     done
 
@@ -145,7 +142,7 @@ pipeline {
 DEPLOYMENT SUCCESSFUL
 ========================================
 
-Simple Calculator App has been deployed.
+Simple Calculator App deployed successfully.
 
 Application:
 http://<EC2-PUBLIC-IP>
@@ -163,14 +160,13 @@ http://<EC2-PUBLIC-IP>/api/health
 DEPLOYMENT FAILED
 ========================================
 
-Collecting Docker Compose logs...
-========================================
+Docker Compose status:
 '''
 
             sh '''
-                cd ${APP_DIR} || exit 0
-
                 docker compose -f ${COMPOSE_FILE} ps || true
+
+                echo "Recent container logs:"
 
                 docker compose -f ${COMPOSE_FILE} logs --tail=100 || true
             '''
@@ -181,6 +177,8 @@ Collecting Docker Compose logs...
         }
     }
 }
+
+
 
 
 
