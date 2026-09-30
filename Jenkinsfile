@@ -18,29 +18,44 @@ pipeline {
             }
         }
 
-        stage('Prepare Deployment') {
+        stage('Verify Files') {
             steps {
-                echo 'Preparing application directory...'
+                echo 'Verifying deployment files...'
 
                 sh '''
                     set -e
 
                     cd ${APP_DIR}
 
-                    echo "Current directory:"
+                    echo "Application directory:"
                     pwd
 
                     echo "Git commit:"
                     git rev-parse --short HEAD
 
                     echo "Checking required files..."
+
                     test -f docker-compose.yml
                     test -f nginx.conf
                     test -f .env
                     test -f Dockerfile
                     test -f backend/Dockerfile
 
-                    echo "Required files are present."
+                    echo "All required files are present."
+                '''
+            }
+        }
+
+        stage('Docker Compose Config Check') {
+            steps {
+                echo 'Validating Docker Compose configuration...'
+
+                sh '''
+                    set -e
+
+                    cd ${APP_DIR}
+
+                    docker compose -f ${COMPOSE_FILE} config
                 '''
             }
         }
@@ -54,42 +69,28 @@ pipeline {
 
                     cd ${APP_DIR}
 
-                    docker compose -f ${COMPOSE_FILE} build --no-cache
+                    docker compose -f ${COMPOSE_FILE} build
                 '''
             }
         }
 
-        stage('Stop Existing Containers') {
+        stage('Deploy Application') {
             steps {
-                echo 'Stopping existing application containers...'
+                echo 'Deploying application...'
 
                 sh '''
                     set -e
 
                     cd ${APP_DIR}
 
-                    docker compose -f ${COMPOSE_FILE} down
-                '''
-            }
-        }
-
-        stage('Start Application') {
-            steps {
-                echo 'Starting application...'
-
-                sh '''
-                    set -e
-
-                    cd ${APP_DIR}
-
-                    docker compose -f ${COMPOSE_FILE} up -d
+                    docker compose -f ${COMPOSE_FILE} up -d --build
                 '''
             }
         }
 
         stage('Verify Containers') {
             steps {
-                echo 'Checking container status...'
+                echo 'Checking running containers...'
 
                 sh '''
                     set -e
@@ -100,8 +101,7 @@ pipeline {
 
                     docker compose -f ${COMPOSE_FILE} ps
 
-                    echo "Checking running containers..."
-
+                    echo "Docker containers:"
                     docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
                 '''
             }
@@ -109,12 +109,12 @@ pipeline {
 
         stage('Health Check') {
             steps {
-                echo 'Running application health check...'
+                echo 'Checking application health...'
 
                 sh '''
                     set -e
 
-                    echo "Checking API health..."
+                    echo "Testing API health endpoint..."
 
                     for i in 1 2 3 4 5
                     do
@@ -125,15 +125,11 @@ pipeline {
                             exit 0
                         fi
 
-                        echo "API not ready yet. Retrying..."
+                        echo "API is not ready yet. Retrying in 5 seconds..."
                         sleep 5
                     done
 
                     echo "API health check failed."
-
-                    cd ${APP_DIR}
-
-                    docker compose -f ${COMPOSE_FILE} logs --tail=100
 
                     exit 1
                 '''
@@ -148,13 +144,15 @@ pipeline {
 ========================================
 DEPLOYMENT SUCCESSFUL
 ========================================
-Simple Calculator App is running.
+
+Simple Calculator App has been deployed.
 
 Application:
 http://<EC2-PUBLIC-IP>
 
 API Health:
 http://<EC2-PUBLIC-IP>/api/health
+
 ========================================
 '''
         }
@@ -164,21 +162,25 @@ http://<EC2-PUBLIC-IP>/api/health
 ========================================
 DEPLOYMENT FAILED
 ========================================
-Check the Jenkins console output and
-Docker Compose logs.
+
+Collecting Docker Compose logs...
 ========================================
 '''
 
+            sh '''
+                cd ${APP_DIR} || exit 0
+
                 docker compose -f ${COMPOSE_FILE} ps || true
+
+                docker compose -f ${COMPOSE_FILE} logs --tail=100 || true
+            '''
         }
+
+        always {
             echo 'Jenkins pipeline finished.'
+        }
+    }
 }
 
-    }
-        }
-        always {
 
-            '''
-                docker compose -f ${COMPOSE_FILE} logs --tail=100 || true
-                cd ${APP_DIR} || true
 
